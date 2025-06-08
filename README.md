@@ -1,6 +1,7 @@
 # NOME: GABRIEL TORRES FERNANDES - RM 553635
 
-# LINK DO VIDEO --> 
+# LINK DO VIDEO --> https://youtu.be/WIbOt2gX23E
+# LINK AZURE DEVOPS - PROJETO --> https://dev.azure.com/RM553635/Gestão%20de%20Abrigos%20-%20DevOps
 # LINK DO PROJETO JAVA --> https://github.com/gabrieltf1901/GS-JAVA.git 
 
 # Gestão de Abrigos e Recursos em Tempo Real
