@@ -1,0 +1,119 @@
+trigger:
+  branches:
+    include:
+      - master
+
+variables:
+  azureSubscription: '296a8631-254f-4aca-8162-9b4663cb01c6'
+  resourceGroupName: 'rg-gestao-abrigos'
+  location: 'brazilsouth'
+  sqlServerName: 'sqlsrv-gestao-$(Build.BuildId)'
+  sqlAdminUser: 'sqladmin'
+  # sqlAdminPassword configurada no UI como variável secreta
+  sqlDatabaseName: 'sqldb-gestao'
+  appServicePlan: 'plan-java-asp'
+  webAppName: 'webapp-java-$(Build.BuildId)'
+
+stages:
+
+- stage: Infra
+  displayName: '1. Criar Infraestrutura'
+  jobs:
+  - job: CreateInfra
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Criar Resource Group'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az group create --name $(resourceGroupName) --location $(location)
+
+    - task: AzureCLI@2
+      displayName: 'Criar SQL Server e Database'
+      env:
+        SQL_ADMIN_PASSWORD: $(sqlAdminPassword)
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az sql server create \
+            --name $(sqlServerName) \
+            --resource-group $(resourceGroupName) \
+            --location $(location) \
+            --admin-user $(sqlAdminUser) \
+            --admin-password "$SQL_ADMIN_PASSWORD"
+          az sql db create \
+            --resource-group $(resourceGroupName) \
+            --server $(sqlServerName) \
+            --name $(sqlDatabaseName) \
+            --service-objective Basic \
+            --backup-storage-redundancy Local
+
+    - task: AzureCLI@2
+      displayName: 'Criar App Service Plan e Web App Java'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az appservice plan create --name $(appServicePlan) --resource-group $(resourceGroupName) --sku B1 --is-linux
+          az webapp create --resource-group $(resourceGroupName) --plan $(appServicePlan) --name $(webAppName) --runtime "JAVA|17-java17"
+
+- stage: Build
+  displayName: '2. Build e Publicar Artefatos'
+  dependsOn: Infra
+  jobs:
+  - job: BuildJava
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+    - task: JavaToolInstaller@0
+      displayName: 'Instalar Java 17'
+      inputs:
+        versionSpec: '17'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+    - script: chmod +x gradlew
+      displayName: 'Permitir execução do Gradle Wrapper'
+    - task: Gradle@3
+      displayName: 'Gradle: clean build'
+      inputs:
+        gradleWrapperFile: 'gradlew'
+        tasks: 'clean build'
+        options: '--stacktrace --info --no-daemon'
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publicar artefato JAR'
+      inputs:
+        targetPath: 'build/libs'      
+        artifact: 'jar-drop'          
+
+- stage: Deploy
+  displayName: '3. Download e Deploy'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - job: DeployApp
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+  
+      - task: DownloadPipelineArtifact@2
+        displayName: 'Baixar artefato JAR'
+        inputs:
+          artifact: 'jar-drop'      
+          path: 'artifact'
+
+
+      - task: AzureWebApp@1
+        displayName: 'Deploy do JAR no Web App'
+        inputs:
+          azureSubscription: '$(azureSubscription)'
+          appName: '$(webAppName)'
+          package: 'artifact/*SNAPSHOT.jar'  
+
